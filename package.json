@@ -1,0 +1,11 @@
+{
+  "name": "war-base-defense-prototype",
+  "private": true,
+  "version": "0.0.1",
+  "description": "WAR (working title) — mobile-first isometric strategy game prototype",
+  "scripts": {
+    "dev": "python3 -m http.server 4173 --bind 0.0.0.0",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --test tests/*.test.mjs"
+  }
+}
