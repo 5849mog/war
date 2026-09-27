@@ -2,10 +2,13 @@ import { BALANCE } from './config/balance.mjs';
 import { validateBalance } from './config/validate.mjs';
 import { loadOrCreateSave, saveSnapshot } from './persistence/save.mjs';
 import { replaySimulation, simulationDigest } from './sim/engine.mjs';
-import { drawMap } from './game/renderer.mjs';
+import { drawBattle, drawMap } from './game/renderer.mjs';
 import { fitScale, screenToCell } from './game/projection.mjs';
+import { createE1Level } from './config/levels.mjs';
+import { advanceBattleTick, applyBattleCommands, createBattle } from './sim/battle.mjs';
+import { isDeploymentCell } from './sim/pathfinding.mjs';
 import {
-  addGarrison, canPlaceBuilding, getBuildingLabel, getCoreLimits, getFootprint, getNextUpgrade,
+  addGarrison, allocateBattleId, canPlaceBuilding, claimBattleReward, getBuildingLabel, getCoreLimits, getFootprint, getNextUpgrade,
   moveBuilding, moveGarrison, placeBuilding, removeGarrison, sellBuilding,
   upgradeBuilding, upgradeWalls,
 } from './campaign/actions.mjs';
@@ -30,6 +33,15 @@ const UNIT_OPTIONS = [
 ];
 let save;
 let currentMode = 'overview';
+const E1_LEVEL = createE1Level();
+let battleState = createBattle({ seed: 498321, level: E1_LEVEL, battleId: 'E1-preview' });
+let battleIsPreview = true;
+let deployType = 'guard';
+let deployCandidate = null;
+let battleSpeed = 1;
+let lastBattleFrame = null;
+let battleFrameAccumulator = 0;
+let lastRosterSignature = '';
 let selectedCell = null;
 let selectedEntityId = null;
 let selectedGarrisonId = null;
@@ -60,14 +72,34 @@ function activePreview() {
   if (garrisonCandidate) return { type: 'garrison', ...garrisonCandidate };
   return null;
 }
-function render() {
+function render(now = performance.now()) {
   if (!save) return;
   const view = viewport();
   if (view.width !== lastDrawSize.width || view.height !== lastDrawSize.height) {
     if (camera.zoom === 1 && camera.panX === 0 && camera.panY === 0) camera.baseScale = fitScale(view, BALANCE.map);
     lastDrawSize = view;
   }
-  drawMap(ctx, canvas, save, camera, selectedCell, { preview: activePreview(), selectedIds: allSelectedIds() });
+  let stepped = 0;
+  if (currentMode === 'battle' && battleState?.phase === 'active' && !battleState.paused && !document.hidden) {
+    if (lastBattleFrame === null) lastBattleFrame = now;
+    const delta = Math.max(0, Math.min(250, now - lastBattleFrame));
+    lastBattleFrame = now;
+    battleFrameAccumulator += delta * battleSpeed;
+    while (battleFrameAccumulator >= BALANCE.tickMs && stepped < 8 && battleState.phase === 'active' && !battleState.paused) {
+      advanceBattleTick(battleState);
+      battleFrameAccumulator -= BALANCE.tickMs;
+      stepped += 1;
+    }
+  } else {
+    lastBattleFrame = now;
+    battleFrameAccumulator = 0;
+  }
+  if (currentMode === 'battle' && battleState) {
+    drawBattle(ctx, canvas, battleState, camera, selectedCell, { preview: deployCandidate ? { type: 'deployment', ...deployCandidate } : null });
+    if (stepped) renderBattlePane();
+  } else {
+    drawMap(ctx, canvas, save, camera, selectedCell, { preview: activePreview(), selectedIds: allSelectedIds() });
+  }
   ui.zoomReadout.textContent = `${Math.round(camera.zoom * 100)}%`;
   requestAnimationFrame(render);
 }
@@ -277,7 +309,120 @@ function updateGarrisonPane() {
   } else $('garrisonPreview').hidden = true;
 }
 
+function renderBattleUnitSelect() {
+  const target = $('battleUnitSelect');
+  const unitNames = { guard: '巡卫', crossbow: '弩手' };
+  const types = ['guard', 'crossbow'];
+  const signature = `${battleIsPreview}:${deployType}:${types.map((type) => battleState.inventory[type] || 0).join(',')}`;
+  if (signature === lastRosterSignature) return;
+  lastRosterSignature = signature;
+  target.replaceChildren();
+  for (const type of types) {
+    const remaining = battleState.inventory[type] || 0;
+    const unit = BALANCE.units[type];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `attack-unit${deployType === type ? ' selected' : ''}`;
+    button.disabled = remaining <= 0 || battleState.phase === 'complete';
+    button.innerHTML = `<span class="mini-unit">${type === 'crossbow' ? '➶' : '●'}</span><span><strong>${unitNames[type]}</strong><small>预备 ${remaining} · 人口 ${unit.population}</small></span>`;
+    button.setAttribute('aria-pressed', String(deployType === type));
+    button.addEventListener('click', () => {
+      deployType = type;
+      deployCandidate = null;
+      lastRosterSignature = '';
+      renderBattlePane();
+    });
+    target.append(button);
+  }
+}
+
+function formatClock(seconds) {
+  const safe = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
+}
+
+function eventLabel(event) {
+  const entityNames = { core: '基地核心', barracks: '军营', archerTower: '箭塔', machineTower: '机枪台', cannonTower: '火炮台', wall: '城墙', guard: '巡卫', crossbow: '弩手' };
+  if (event.type === 'ai-decision') return `守方 ${entityNames[event.unitId?.split('-').at(-2)] || '驻军'}：${event.decision === 'hold' ? '留守' : '出阵'} · ${event.reason}`;
+  if (event.type === 'building-destroyed') return `摧毁${entityNames[event.buildingType] || '建筑'} · 权重 +${event.weight}`;
+  if (event.type === 'unit-defeated') return `${event.team === 'attacker' ? '进攻单位' : '守军'}离场`;
+  if (event.type === 'unit-deployed') return `部署${entityNames[event.unitType] || '单位'}至 (${event.x}, ${event.y})`;
+  if (event.type === 'projectile-fired') return '远程单位已发射';
+  if (event.type === 'battle-settled') return `结算 · ${event.stars} 星`;
+  if (event.type === 'paused') return '战斗已暂停';
+  if (event.type === 'resumed') return '战斗已恢复';
+  return '';
+}
+
+function renderBattlePane() {
+  const session = $('battleSessionPanel');
+  const prepare = $('prepareBattle');
+  const phaseLabel = $('battlePhaseLabel');
+  session.hidden = battleIsPreview;
+  prepare.hidden = !battleIsPreview && battleState.phase !== 'complete';
+  prepare.textContent = battleState.phase === 'complete' ? '再次挑战 E1' : '开始进攻';
+  phaseLabel.textContent = battleIsPreview
+    ? '可重复挑战 · 部署前 AI 不行动，计时未开始。'
+    : battleState.phase === 'ready' ? '侦察完成 · 等待首次部署；AI 守军仍未行动。'
+      : battleState.phase === 'active' ? '交战中 · 守军已响应，部署前尚未消耗战斗时间。'
+        : '本场已结算 · 可查看战报或重新挑战。';
+  if (battleIsPreview) return;
+
+  const destroyed = battleState.buildings.filter((item) => item.destroyed).length;
+  const damageWeight = battleState.buildings.filter((item) => item.destroyed).reduce((sum, item) => sum + (item.type === 'wall' ? BALANCE.walls[item.material].weight : BALANCE.buildings[item.type].weight), 0);
+  const damagePercent = battleState.initialWeight ? damageWeight / battleState.initialWeight * 100 : 0;
+  const remainingSeconds = Math.max(0, (battleState.durationTicks - battleState.elapsedTicks) / (1000 / BALANCE.tickMs));
+  $('battleClock').textContent = battleState.phase === 'ready'
+    ? '等待部署 · 180 秒未开始'
+    : battleState.phase === 'active'
+      ? `${battleState.paused ? '已暂停 · ' : ''}${formatClock(remainingSeconds)} · ${battleSpeed}×`
+      : `已用时 ${formatClock(battleState.elapsedTicks / (1000 / BALANCE.tickMs))}`;
+  $('battleProgress').textContent = battleState.phase === 'ready'
+    ? '选择巡卫或弩手，在地图外缘点一个部署环格，再确认。首次部署后才开始 180 秒计时。'
+    : battleState.phase === 'active'
+      ? `建筑破坏 ${destroyed}/${battleState.initialBuildingCount} · 权重破坏 ${damagePercent.toFixed(1)}% · 预备巡卫 ${battleState.inventory.guard || 0}、弩手 ${battleState.inventory.crossbow || 0}`
+      : '本局结果已冻结，战场不会写回任何基地损伤。';
+
+  renderBattleUnitSelect();
+  const totalPopulation = Object.entries(battleState.inventory).reduce((sum, [type, count]) => sum + (BALANCE.units[type]?.population || 0) * count, 0);
+  $('attackPopulation').textContent = `剩余人口 ${totalPopulation}`;
+  $('battleControls').hidden = battleState.phase !== 'active';
+  $('togglePause').textContent = battleState.paused ? '继续' : '暂停';
+  $('speedToggle').textContent = `${battleSpeed}×`;
+  $('attackRosterSection').hidden = battleState.phase === 'complete';
+  $('battleReportPanel').hidden = battleState.phase !== 'complete';
+  $('deployPreview').hidden = !deployCandidate || battleState.phase === 'complete';
+  if (deployCandidate) {
+    const legal = isDeploymentCell(deployCandidate.x, deployCandidate.y) && (battleState.inventory[deployType] || 0) > 0;
+    $('deployPreviewTitle').textContent = `部署${deployType === 'guard' ? '巡卫' : '弩手'}到 (${deployCandidate.x}, ${deployCandidate.y})`;
+    $('deployPreviewMessage').textContent = legal ? `部署环位置合法 · 还可部署 ${battleState.inventory[deployType]} 名 · 首次部署启动计时` : '请选择外侧部署环空格，并确认兵种库存大于 0。';
+    $('confirmDeploy').disabled = !legal || battleState.paused;
+  }
+  if (battleState.report) {
+    const report = battleState.report;
+    $('battleStars').textContent = '★'.repeat(report.stars) + '☆'.repeat(3 - report.stars);
+    $('battleReportSummary').textContent = `破坏率 ${report.damagePercent.toFixed(2)}% · 权重 ${report.destroyedWeight}/${report.totalWeight} · 奖励 ${report.reward} 金币 · 种子 ${report.seed}`;
+    const claimed = save.battleReceipts?.includes(report.battleId);
+    $('battleReceiptStatus').textContent = claimed ? '本场奖励已写入本机存档。' : report.reward > 0 ? '领取前不改变金币；领取后会记录唯一战斗编号。' : '本场奖励为 0 金币。';
+    $('claimReward').textContent = report.reward > 0 ? `领取 ${report.reward} 金币` : '确认结算';
+    $('claimReward').disabled = Boolean(claimed);
+  }
+  const feed = $('battleEventFeed');
+  feed.replaceChildren();
+  for (const event of battleState.events.slice(-8).reverse()) {
+    const label = eventLabel(event);
+    if (!label) continue;
+    const row = document.createElement('li');
+    row.textContent = `${formatClock(event.tick * BALANCE.tickMs / 1000)} · ${label}`;
+    feed.append(row);
+  }
+}
+
 function setMode(mode) {
+  if (currentMode === 'battle' && mode !== 'battle' && battleState?.phase === 'active' && !battleState.paused) {
+    applyBattleCommands(battleState, [{ type: 'pause' }]);
+    renderBattlePane();
+  }
   currentMode = mode;
   for (const tab of document.querySelectorAll('.mode-tab')) {
     const active = tab.dataset.mode === mode;
@@ -286,8 +431,33 @@ function setMode(mode) {
   $('overviewPane').hidden = mode !== 'overview';
   $('buildPane').hidden = mode !== 'build';
   $('garrisonPane').hidden = mode !== 'garrison';
+  $('battlePane').hidden = mode !== 'battle';
   if (mode === 'build') updateEditorPane();
   if (mode === 'garrison') updateGarrisonPane();
+  if (mode === 'battle') renderBattlePane();
+}
+
+async function beginBattleSession() {
+  if (!battleIsPreview && battleState.phase !== 'complete') return;
+  let battleId = null;
+  const saved = await commitMutation(() => {
+    const result = allocateBattleId(save);
+    battleId = result.battleId;
+    return result;
+  });
+  if (!saved || !battleId) return;
+  const sequence = Number(battleId.split('-').at(-1));
+  const seed = (498321 + sequence) >>> 0;
+  battleState = createBattle({ seed, level: E1_LEVEL, attackRoster: save.attackRoster, battleId });
+  applyBattleCommands(battleState, [{ type: 'start' }]);
+  battleIsPreview = false;
+  deployType = 'guard';
+  deployCandidate = null;
+  lastRosterSignature = '';
+  battleFrameAccumulator = 0;
+  lastBattleFrame = null;
+  camera.zoom = 1; camera.panX = 0; camera.panY = 0;
+  renderBattlePane();
 }
 
 async function commitMutation(action) {
@@ -359,6 +529,12 @@ function resolveMapTap(cell) {
     selectedGarrisonId = found?.kind === 'garrison' ? found.entity.id : null;
     updateGarrisonPane(); return;
   }
+  if (currentMode === 'battle') {
+    if (battleIsPreview || !['ready', 'active'].includes(battleState.phase)) return;
+    deployCandidate = { x: cell.x, y: cell.y, valid: isDeploymentCell(cell.x, cell.y) && (battleState.inventory[deployType] || 0) > 0 };
+    renderBattlePane();
+    return;
+  }
   const found = entityAt(cell.x, cell.y);
   if (found?.kind === 'building') {
     ui.selectionTitle.textContent = getBuildingLabel(found.entity.type);
@@ -423,6 +599,42 @@ canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 
 for (const tab of document.querySelectorAll('.mode-tab')) tab.addEventListener('click', () => setMode(tab.dataset.mode));
+$('prepareBattle').addEventListener('click', beginBattleSession);
+$('cancelDeploy').addEventListener('click', () => { deployCandidate = null; renderBattlePane(); });
+$('confirmDeploy').addEventListener('click', () => {
+  if (!deployCandidate || !isDeploymentCell(deployCandidate.x, deployCandidate.y) || (battleState.inventory[deployType] || 0) <= 0) return;
+  const accepted = applyBattleCommands(battleState, [{ type: 'deploy', unitType: deployType, x: deployCandidate.x, y: deployCandidate.y }]);
+  deployCandidate = null;
+  lastRosterSignature = '';
+  battleFrameAccumulator = 0;
+  lastBattleFrame = null;
+  renderBattlePane();
+  if (accepted.phase === 'active') ui.saveStatus.textContent = `战斗 ${battleState.battleId} · 首次部署已启动 180 秒计时 · 种子 ${battleState.seed}`;
+});
+$('togglePause').addEventListener('click', () => {
+  if (battleState.phase !== 'active') return;
+  applyBattleCommands(battleState, [{ type: battleState.paused ? 'resume' : 'pause' }]);
+  lastBattleFrame = null; battleFrameAccumulator = 0; renderBattlePane();
+});
+$('speedToggle').addEventListener('click', () => { battleSpeed = battleSpeed === 1 ? 2 : 1; renderBattlePane(); });
+$('surrenderBattle').addEventListener('click', () => {
+  if (!window.confirm('结束本场进攻？本局将按主动结束结算为 0 金币。')) return;
+  applyBattleCommands(battleState, [{ type: 'surrender' }]);
+  deployCandidate = null; renderBattlePane();
+});
+$('claimReward').addEventListener('click', async () => {
+  if (!battleState.report) return;
+  const applied = await commitMutation(() => claimBattleReward(save, battleState.report));
+  if (applied) renderBattlePane();
+});
+$('returnHome').addEventListener('click', () => setMode('overview'));
+document.addEventListener('visibilitychange', () => {
+  lastBattleFrame = null; battleFrameAccumulator = 0;
+  if (document.hidden && battleState?.phase === 'active' && !battleState.paused) {
+    applyBattleCommands(battleState, [{ type: 'pause' }]);
+    renderBattlePane();
+  }
+});
 $('zoomIn').addEventListener('click', () => zoomAt(camera.zoom * 1.18));
 $('zoomOut').addEventListener('click', () => zoomAt(camera.zoom / 1.18));
 $('resetCamera').addEventListener('click', () => { camera.zoom = 1; camera.panX = 0; camera.panY = 0; });

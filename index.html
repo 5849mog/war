@@ -40,6 +40,7 @@
           <button class="mode-tab active" data-mode="overview" aria-pressed="true">总览</button>
           <button class="mode-tab" data-mode="build" aria-pressed="false">建造</button>
           <button class="mode-tab" data-mode="garrison" aria-pressed="false">驻军</button>
+          <button class="mode-tab" data-mode="battle" aria-pressed="false">进攻</button>
         </nav>
 
         <div id="overviewPane" class="mode-pane">
@@ -103,6 +104,50 @@
             </div>
             <div id="garrisonActions" class="editor-actions"></div>
           </section>
+        </div>
+
+        <div id="battlePane" class="mode-pane" hidden>
+          <section class="panel-section">
+            <div class="section-heading"><h2>E1 · 四门木环</h2><span class="tiny-caption">轻松 · AI 基地</span></div>
+            <p class="section-copy">侦察显示核心、箭塔、机枪台、12 段木墙与驻军。只有你开始部署后，守方才响应；不含玩家基地防守战斗。</p>
+            <div id="battlePhaseLabel" class="editor-status">可重复挑战 · 胜负由固定步长战斗结算。</div>
+            <button id="prepareBattle" class="primary-button">开始进攻</button>
+          </section>
+          <div id="battleSessionPanel" hidden>
+            <section class="panel-section">
+              <div class="section-heading"><h2>战斗状态</h2><span id="battleClock" class="tiny-caption">等待部署 · 180 秒未开始</span></div>
+              <div id="battleProgress" class="editor-status">点选部署环格子，预览后再确认。</div>
+            </section>
+            <section id="attackRosterSection" class="panel-section">
+              <div class="section-heading"><h2>进攻编队</h2><span id="attackPopulation" class="tiny-caption"></span></div>
+              <div id="battleUnitSelect" class="attack-unit-list"></div>
+              <div id="deployPreview" class="placement-preview" hidden>
+                <strong id="deployPreviewTitle"></strong><span id="deployPreviewMessage"></span>
+                <div class="editor-actions"><button id="confirmDeploy" class="primary-button">确认部署</button><button id="cancelDeploy" class="secondary-button">取消</button></div>
+              </div>
+            </section>
+            <section id="battleControls" class="panel-section" hidden>
+              <div class="section-heading"><h2>战斗控制</h2><span class="tiny-caption">固定 50 ms tick</span></div>
+              <div class="battle-control-row">
+                <button id="togglePause" class="secondary-button">暂停</button>
+                <button id="speedToggle" class="secondary-button">1×</button>
+                <button id="surrenderBattle" class="secondary-button">结束</button>
+              </div>
+            </section>
+            <section id="battleReportPanel" class="panel-section" hidden>
+              <div class="section-heading"><h2>战报</h2><span id="battleStars" class="report-stars">☆☆☆</span></div>
+              <div id="battleReportSummary" class="editor-status"></div>
+              <div id="battleReceiptStatus" class="tiny-caption"></div>
+              <div class="battle-control-row">
+                <button id="claimReward" class="primary-button">领取金币</button>
+                <button id="returnHome" class="secondary-button">返回总览</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="section-heading"><h2>战斗记录</h2><span class="tiny-caption">可重放</span></div>
+              <ol id="battleEventFeed" class="event-feed"></ol>
+            </section>
+          </div>
         </div>
 
         <section class="system-card">
