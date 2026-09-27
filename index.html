@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#354138" />
-    <meta name="description" content="WAR（工作名）原创基地攻防游戏的 M4 可运行切片。" />
+    <meta name="description" content="WAR（工作名）原创基地攻防游戏的 M5 手机横屏试玩版。" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/brand-mark.svg" type="image/svg+xml" />
     <title>WAR · 工匠城邦（工作名）</title>
     <link rel="stylesheet" href="./src/ui/app.css" />
   </head>
@@ -17,7 +19,7 @@
             <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
             <div><div class="brand-title">WAR <span>工作名</span></div><div class="brand-caption">工匠城邦 · 美术与世界观占位</div></div>
           </div>
-          <div class="mobile-badge"><i></i> M4 · 响应式守军</div>
+          <div class="mobile-badge"><i></i> M5 · 首发产品化候选</div>
         </header>
         <div class="map-label"><span class="label-dot"></span>基地蓝图 <small>固定 2.5D 斜视</small></div>
         <div class="camera-tools" aria-label="地图视角工具">
@@ -153,6 +155,17 @@
           </div>
         </div>
 
+        <section class="panel-section settings-section" aria-labelledby="experienceSettingsTitle">
+          <div class="section-heading"><h2 id="experienceSettingsTitle">体验设置</h2><button id="openGuide" class="text-button" type="button">查看引导</button></div>
+          <label class="setting-row" for="soundSetting"><span><strong>界面音效</strong><small>原创合成音 · 不加载外部音频</small></span><input id="soundSetting" type="checkbox" /></label>
+          <label class="setting-row" for="reducedMotionSetting"><span><strong>减弱动画</strong><small>减少界面过渡与动效</small></span><input id="reducedMotionSetting" type="checkbox" /></label>
+          <div class="save-transfer-row">
+            <button id="exportSave" class="secondary-button" type="button">导出存档</button>
+            <button id="importSave" class="secondary-button" type="button">导入存档</button>
+            <input id="importSaveFile" type="file" accept=".json,application/json" hidden />
+          </div>
+        </section>
+
         <section class="system-card">
           <div class="system-header"><span class="system-led"></span><strong>原型运行状态</strong><span class="system-version">M4</span></div>
           <div id="saveStatus" class="system-line">正在读取本机存档…</div>
@@ -167,6 +180,22 @@
         <div class="footer-note"><span>原创美术占位 · 不使用外部素材</span><span>v0.6 设计基线</span></div>
       </aside>
     </main>
+    <dialog id="guideDialog" class="app-dialog" aria-labelledby="guideTitle">
+      <div class="dialog-content">
+        <div class="dialog-heading"><span id="guideStep" class="tiny-caption"></span><button id="guideSkip" class="icon-button" type="button" aria-label="关闭引导">×</button></div>
+        <h2 id="guideTitle"></h2>
+        <p id="guideBody" class="section-copy" aria-live="polite"></p>
+        <div class="dialog-actions"><button id="guidePrevious" class="secondary-button" type="button">上一步</button><button id="guideNext" class="primary-button" type="button">下一步</button></div>
+      </div>
+    </dialog>
+    <dialog id="importDialog" class="app-dialog" aria-labelledby="importTitle">
+      <div class="dialog-content">
+        <div class="dialog-heading"><span class="tiny-caption">导入预览</span><span class="status-chip">将在本机保存</span></div>
+        <h2 id="importTitle">替换本机存档？</h2>
+        <p id="importPreview" class="section-copy" aria-live="polite"></p>
+        <div class="dialog-actions"><button id="cancelImport" class="secondary-button" type="button">取消</button><button id="confirmImport" class="primary-button" type="button">确认替换</button></div>
+      </div>
+    </dialog>
     <script type="module" src="./src/main.mjs"></script>
   </body>
 </html>

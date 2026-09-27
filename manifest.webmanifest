@@ -1,0 +1,20 @@
+{
+  "name": "WAR · 工匠城邦（工作名）",
+  "short_name": "WAR",
+  "description": "手机横屏原创卡通奇幻基地攻防试玩版。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#354138",
+  "theme_color": "#354138",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./assets/brand-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

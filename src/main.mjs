@@ -1,6 +1,8 @@
 import { BALANCE } from './config/balance.mjs';
 import { validateBalance } from './config/validate.mjs';
 import { loadOrCreateSave, saveSnapshot } from './persistence/save.mjs';
+import { exportSavePackage, parseSavePackage } from './persistence/save-transfer.mjs';
+import { playCue } from './audio/effects.mjs';
 import { replaySimulation, simulationDigest } from './sim/engine.mjs';
 import { drawBattle, drawMap } from './game/renderer.mjs';
 import { fitScale, screenToCell } from './game/projection.mjs';
@@ -56,6 +58,9 @@ let garrisonType = null;
 let garrisonCandidate = null;
 let pendingGarrisonMoveId = null;
 let writingSave = false;
+let pendingImport = null;
+let battleAudioCursor = 0;
+let guidePage = 0;
 let lastDrawSize = { width: 0, height: 0 };
 const activePointers = new Map();
 let gesture = null;
@@ -89,6 +94,7 @@ function render(now = performance.now()) {
     battleFrameAccumulator += delta * battleSpeed;
     while (battleFrameAccumulator >= BALANCE.tickMs && stepped < 8 && battleState.phase === 'active' && !battleState.paused) {
       advanceBattleTick(battleState);
+      playBattleEvents();
       battleFrameAccumulator -= BALANCE.tickMs;
       stepped += 1;
     }
@@ -504,6 +510,7 @@ async function beginBattleSession() {
   const sequence = Number(battleId.split('-').at(-1));
   const seed = (498321 + sequence) >>> 0;
   battleState = createBattle({ seed, level: selectedLevel, attackRoster: save.attackRoster, battleId });
+  battleAudioCursor = 0;
   applyBattleCommands(battleState, [{ type: 'start' }]);
   battleIsPreview = false;
   deployType = 'guard';
@@ -679,6 +686,7 @@ $('cancelDeploy').addEventListener('click', () => { deployCandidate = null; rend
 $('confirmDeploy').addEventListener('click', () => {
   if (!deployCandidate || !isDeploymentCell(deployCandidate.x, deployCandidate.y) || (battleState.inventory[deployType] || 0) <= 0) return;
   const accepted = applyBattleCommands(battleState, [{ type: 'deploy', unitType: deployType, x: deployCandidate.x, y: deployCandidate.y }]);
+  playBattleEvents();
   deployCandidate = null;
   lastRosterSignature = '';
   battleFrameAccumulator = 0;
@@ -730,6 +738,131 @@ $('confirmGarrison').addEventListener('click', async () => {
 });
 $('cancelGarrison').addEventListener('click', () => { garrisonType = null; garrisonCandidate = null; pendingGarrisonMoveId = null; updateGarrisonPane(); });
 
+
+const GUIDE_PAGES = [
+  { title: '先认识基地蓝图', body: '总览可查看初始建筑与金币。建造面板先选设施，再点地图预览；只有确认后才扣金币。地图支持拖动、缩放与重置视角。' },
+  { title: '编排与保存', body: '驻军面板可编辑本机蓝图中的守军站位。请注意：首发没有玩家基地防守战斗，自建基地和驻军暂时只可编辑、保存与查看。' },
+  { title: '主动进攻 AI 基地', body: '进入“进攻”选择关卡与兵种，点击开战后部署首个单位才会启动计时并唤醒守军 AI。守军会按可见敌军和真实通路留守或出阵。' },
+  { title: '战报与本机存档', body: '战斗结束后可查看星级、破坏率和奖励。金币、蓝图和驻军保存在此设备；可从设置中导出备份，或预览后导入存档。' },
+];
+
+function applyExperienceSettings() {
+  const settings = save?.settings || { sound: true, reducedMotion: false };
+  document.body.classList.toggle('reduced-motion', Boolean(settings.reducedMotion));
+  const sound = $('soundSetting'); const motion = $('reducedMotionSetting');
+  if (sound) sound.checked = Boolean(settings.sound);
+  if (motion) motion.checked = Boolean(settings.reducedMotion);
+}
+
+async function persistSetting(key, value) {
+  if (!save || writingSave) return;
+  const next = { ...save, settings: { ...(save.settings || {}), [key]: value } };
+  writingSave = true;
+  try {
+    await saveSnapshot(next);
+    save = next;
+    applyExperienceSettings();
+    ui.saveStatus.textContent = key === 'sound' ? (value ? '原创界面音效已开启。' : '音效已静音。') : (value ? '动画已减弱。' : '常规界面动效已恢复。');
+    if (value && key === 'sound') playCue('tap', true);
+  } catch (error) {
+    ui.saveStatus.textContent = '设置保存失败：' + error.message;
+    applyExperienceSettings();
+  } finally { writingSave = false; }
+}
+
+function playBattleEvents() {
+  if (!battleState || !save) return;
+  const events = battleState.events.slice(battleAudioCursor);
+  battleAudioCursor = battleState.events.length;
+  if (!save.settings?.sound) return;
+  for (const event of events) {
+    const cue = event.type === 'unit-deployed' ? 'deployed'
+      : event.type === 'building-destroyed' ? 'breach'
+        : event.type === 'battle-settled' ? 'settled'
+          : event.type === 'projectile-fired' ? 'shot' : null;
+    if (cue) playCue(cue, true);
+  }
+}
+
+function renderGuide() {
+  const page = GUIDE_PAGES[guidePage];
+  $('guideTitle').textContent = page.title;
+  $('guideBody').textContent = page.body;
+  $('guideStep').textContent = '引导 ' + (guidePage + 1) + ' / ' + GUIDE_PAGES.length;
+  $('guidePrevious').disabled = guidePage === 0;
+  $('guideNext').textContent = guidePage === GUIDE_PAGES.length - 1 ? '完成' : '下一步';
+}
+
+function openGuide() {
+  guidePage = 0;
+  renderGuide();
+  if (!$('guideDialog').open) $('guideDialog').showModal();
+}
+
+function downloadCurrentSave() {
+  const contents = exportSavePackage(save);
+  const blob = new Blob([contents], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'war-blueprint-' + new Date().toISOString().slice(0, 10) + '.json';
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  ui.saveStatus.textContent = '存档已导出为带校验的 JSON 文件。';
+}
+
+async function reviewImportFile(file) {
+  if (!file) return;
+  if (!battleIsPreview && ['ready', 'active'].includes(battleState.phase)) {
+    ui.saveStatus.textContent = '请先结束当前战斗，再导入存档。';
+    $('importSaveFile').value = '';
+    return;
+  }
+  let fileText;
+  try { fileText = await file.text(); }
+  catch (error) { ui.saveStatus.textContent = '读取导入文件失败：' + error.message; $('importSaveFile').value = ''; return; }
+  const parsed = parseSavePackage(fileText);
+  if (!parsed.ok) {
+    ui.saveStatus.textContent = '导入已拒绝：' + parsed.error;
+    $('importSaveFile').value = '';
+    return;
+  }
+  pendingImport = parsed;
+  const meta = parsed.metadata;
+  $('importPreview').textContent = '版本 ' + meta.contentVersion + ' · 金币 ' + meta.coins
+    + ' · 建筑 ' + meta.buildingCount + ' · 驻军 ' + meta.garrisonCount
+    + '. 确认后将替换本机进度，并把当前存档留作备份。';
+  $('importDialog').showModal();
+}
+
+async function confirmSaveImport() {
+  if (!pendingImport || writingSave) return;
+  writingSave = true;
+  try {
+    await saveSnapshot(pendingImport.save);
+    save = pendingImport.save;
+    pendingImport = null;
+    applyExperienceSettings();
+    renderOverview();
+    updateEditorPane();
+    updateGarrisonPane();
+    if (battleIsPreview || battleState.phase === 'complete') {
+      selectedLevel = structuredClone(getLevel(selectedLevelId) || LEVELS[0]);
+      battleState = createBattle({ seed: 498321, level: selectedLevel, attackRoster: save.attackRoster, battleId: selectedLevelId + '-preview' });
+      battleAudioCursor = 0;
+      battleIsPreview = true;
+      renderBattlePane();
+    }
+    ui.saveStatus.textContent = '已导入存档；被替换的进度保存在上一次存档备份中。';
+    $('importDialog').close();
+  } catch (error) {
+    ui.saveStatus.textContent = '导入保存失败，本机存档未替换：' + error.message;
+  } finally {
+    writingSave = false;
+    $('importSaveFile').value = '';
+  }
+}
+
 function runDeterminismCheck() {
   const commands = Array.from({ length: 400 }, (_, tick) => tick % 37 === 0 ? [{ type: 'marker', x: tick % 28, y: (tick * 3) % 28 }] : []);
   const first = replaySimulation(20260927, commands, 400);
@@ -745,6 +878,22 @@ $('saveButton').addEventListener('click', async () => {
   catch (error) { ui.saveStatus.textContent = `存档写入失败：${error.message}`; }
 });
 
+
+$('soundSetting').addEventListener('change', (event) => persistSetting('sound', event.target.checked));
+$('reducedMotionSetting').addEventListener('change', (event) => persistSetting('reducedMotion', event.target.checked));
+$('openGuide').addEventListener('click', () => openGuide());
+$('guideSkip').addEventListener('click', () => { try { localStorage.setItem('war-guide-v1', 'seen'); } catch { /* local storage may be unavailable */ } $('guideDialog').close(); });
+$('guidePrevious').addEventListener('click', () => { guidePage = Math.max(0, guidePage - 1); renderGuide(); });
+$('guideNext').addEventListener('click', () => {
+  if (guidePage === GUIDE_PAGES.length - 1) { try { localStorage.setItem('war-guide-v1', 'seen'); } catch { /* local storage may be unavailable */ } $('guideDialog').close(); }
+  else { guidePage += 1; renderGuide(); }
+});
+$('exportSave').addEventListener('click', downloadCurrentSave);
+$('importSave').addEventListener('click', () => $('importSaveFile').click());
+$('importSaveFile').addEventListener('change', (event) => reviewImportFile(event.target.files?.[0]));
+$('cancelImport').addEventListener('click', () => { pendingImport = null; $('importDialog').close(); });
+$('confirmImport').addEventListener('click', confirmSaveImport);
+
 async function start() {
   const errors = validateBalance();
   if (errors.length) { ui.saveStatus.textContent = `参数校验失败：${errors.join('；')}`; return; }
@@ -759,6 +908,8 @@ async function start() {
   renderOverview();
   updateEditorPane();
   updateGarrisonPane();
+  applyExperienceSettings();
+  try { if (localStorage.getItem('war-guide-v1') !== 'seen') openGuide(true); } catch { openGuide(); }
   renderBattlePane();
   render();
 }
