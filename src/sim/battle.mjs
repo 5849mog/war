@@ -1,6 +1,6 @@
 import { BALANCE } from '../config/balance.mjs';
 import { nextRandom } from './rng.mjs';
-import { activateDefense } from '../ai/defense-policy.mjs';
+import { activateDefense, reevaluateDefense } from '../ai/defense-policy.mjs';
 import {
   bestApproachPath, blockingBuilding, buildingCenter, closestPointOnBuilding,
   distanceToBuilding, hasLineOfSight, isDeploymentCell, searchGrid,
@@ -31,6 +31,7 @@ function simulationUnit(unit, team, index = 0) {
   return {
     id: unit.id || `${team}-${unit.type}-${String(index + 1).padStart(3, '0')}`,
     type: unit.type, team, x: unit.x + .5, y: unit.y + .5,
+    homeX: unit.x, homeY: unit.y, aiDecision: null, aiTargetId: null, lastAiSwitchTick: null,
     hp: spec.hp, maxHp: spec.hp, cooldownTicks: 0,
     targetId: null, pathTargetId: null, path: [], pathIndex: 0,
     nextPathTick: 0, alive: true,
@@ -53,6 +54,7 @@ export function createBattle({ seed = 1, level, attackRoster = level?.attackRost
     initialWeight: totalWeight(buildings), initialBuildingCount: buildings.length,
     buildings, attackers: [], defenders, inventory, projectiles: [],
     inputLog: [], events: [], aiDecisions: [], report: null, nextUnitIndex: 1,
+    aiIntents: {}, lastAiEvaluationTick: 0, aiNeedsEvaluation: false,
   };
 }
 
@@ -70,6 +72,17 @@ function allAttackersGone(state) {
   return state.attackers.every((unit) => !unit.alive) && Object.values(state.inventory).every((count) => count <= 0);
 }
 
+function unitCellOccupied(state, x, y) {
+  return state.attackers.concat(state.defenders).some((unit) => unit.alive
+    && Math.floor(unit.x) === x && Math.floor(unit.y) === y);
+}
+
+function occupiedCells(state, exceptId) {
+  return new Set(state.attackers.concat(state.defenders)
+    .filter((unit) => unit.alive && unit.id !== exceptId)
+    .map((unit) => Math.floor(unit.y) * BALANCE.map.width + Math.floor(unit.x)));
+}
+
 function applyCommand(state, command) {
   if (command.type === 'start') {
     if (state.phase !== 'scout') return false;
@@ -81,7 +94,7 @@ function applyCommand(state, command) {
   if (command.type === 'deploy') {
     const { unitType, x, y } = command;
     if (!['ready', 'active'].includes(state.phase) || !BALANCE.units[unitType] || state.inventory[unitType] <= 0) return false;
-    if (!isDeploymentCell(x, y)) return false;
+    if (!isDeploymentCell(x, y) || unitCellOccupied(state, x, y)) return false;
     const unit = simulationUnit({ type: unitType, x, y }, 'attacker', state.nextUnitIndex++);
     unit.id = `${state.battleId}-atk-${String(state.nextUnitIndex - 1).padStart(3, '0')}`;
     state.attackers.push(unit);
@@ -94,7 +107,7 @@ function applyCommand(state, command) {
       state.phase = 'active';
       state.defenseActivated = true;
       activateDefense(state);
-    }
+    } else state.aiNeedsEvaluation = true;
     return true;
   }
   if (command.type === 'pause' || command.type === 'resume') {
@@ -169,7 +182,7 @@ export function chooseAttackerTarget(state, unit) {
       .sort((a, b) => distanceToBuilding(unit.x, unit.y, a) - distanceToBuilding(unit.x, unit.y, b) || byId(a, b));
     if (visibleBuildings.length) return { target: visibleBuildings[0], kind: 'building', route: null };
   }
-  const search = searchGrid(state, unit.x, unit.y);
+  const search = searchGrid(state, unit.x, unit.y, new Set(), occupiedCells(state, unit.id));
   const options = state.buildings.filter(active).map((building) => {
     const approach = bestApproachPath(search, building);
     if (!approach) return null;
@@ -202,6 +215,12 @@ function moveUnit(state, unit) {
   while (travel > 1e-9 && unit.pathIndex < unit.path.length) {
     const waypoint = unit.path[unit.pathIndex];
     const dx = waypoint.x - unit.x; const dy = waypoint.y - unit.y; const distance = Math.hypot(dx, dy);
+    const stepDistance = Math.min(travel, distance);
+    const nextX = unit.x + dx / Math.max(distance, 1e-9) * stepDistance;
+    const nextY = unit.y + dy / Math.max(distance, 1e-9) * stepDistance;
+    const collision = state.attackers.concat(state.defenders).some((other) => other.alive && other.id !== unit.id
+      && Math.hypot(nextX - other.x, nextY - other.y) < BALANCE.battle.unitSeparation - 1e-9);
+    if (collision) { unit.path = []; unit.pathIndex = 0; return; }
     if (distance <= travel + 1e-9) {
       unit.x = waypoint.x; unit.y = waypoint.y; travel -= distance; unit.pathIndex += 1;
     } else {
@@ -278,9 +297,20 @@ function defenderTarget(state, unit) {
 
 function updateDefender(state, unit, hits) {
   const target = defenderTarget(state, unit);
-  if (!target) { unit.cooldownTicks = 0; return; }
-  if (unit.cooldownTicks > 0) unit.cooldownTicks -= 1;
-  if (unit.cooldownTicks === 0) fireFromUnit(state, unit, target, 'unit', hits);
+  if (target) {
+    if (unit.cooldownTicks > 0) unit.cooldownTicks -= 1;
+    if (unit.cooldownTicks === 0) fireFromUnit(state, unit, target, 'unit', hits);
+    return;
+  }
+  unit.cooldownTicks = 0;
+  const intent = state.aiIntents[unit.id];
+  if (!intent || (intent.decision !== 'exit' && !intent.returning)) return;
+  if (intent.decision === 'exit' && !state.attackers.some((attacker) => attacker.id === intent.targetId && attacker.alive)) {
+    state.aiNeedsEvaluation = true;
+    return;
+  }
+  moveUnit(state, unit);
+  if (unit.pathIndex >= unit.path.length) state.aiNeedsEvaluation = true;
 }
 
 export function chooseTowerTarget(state, tower) {
@@ -404,6 +434,8 @@ export function advanceBattleTick(state, commands = []) {
 
   state.tick += 1;
   state.elapsedTicks += 1;
+  if (state.aiNeedsEvaluation) reevaluateDefense(state, { force: true, trigger: 'new-unit-or-route-end' });
+  else reevaluateDefense(state);
   const hits = [];
   resolveProjectiles(state, hits);
 
@@ -411,7 +443,11 @@ export function advanceBattleTick(state, commands = []) {
   for (const unit of state.defenders.filter((item) => item.alive).sort(byId)) updateDefender(state, unit, hits);
   for (const tower of state.buildings.filter((item) => active(item) && ['archerTower', 'machineTower', 'cannonTower'].includes(item.type)).sort(byId)) updateTower(state, tower);
 
+  const destroyedBefore = state.buildings.filter((building) => building.destroyed).length;
   applyHits(state, hits);
+  if (state.buildings.filter((building) => building.destroyed).length > destroyedBefore) {
+    reevaluateDefense(state, { force: true, trigger: 'building-destroyed' });
+  }
   if (activeBuildingCount(state) === 0) finishBattle(state, 'all-buildings-destroyed');
   else if (state.elapsedTicks >= state.durationTicks) finishBattle(state, 'time-expired');
   else if (state.firstDeployment && allAttackersGone(state)) finishBattle(state, 'attack-force-expended');
@@ -431,11 +467,13 @@ export function battleDigest(state) {
     inventory: state.inventory,
     buildings: state.buildings.map(({ id, hp, destroyed }) => ({ id, hp, destroyed })).sort(byId),
     attackers: state.attackers.map(({ id, type, x, y, hp, alive }) => ({ id, type, x, y, hp, alive })).sort(byId),
-    defenders: state.defenders.map(({ id, type, x, y, hp, alive }) => ({ id, type, x, y, hp, alive })).sort(byId),
+    defenders: state.defenders.map(({ id, type, x, y, hp, alive, aiDecision, aiTargetId, path, pathIndex, homeX, homeY }) => ({
+      id, type, x, y, hp, alive, aiDecision, aiTargetId, path, pathIndex, homeX, homeY,
+    })).sort(byId),
     projectiles: state.projectiles.map(({ id, sourceId, targetId, targetKind, targetPoint, radius, damage, flightTicks }) => ({
       id, sourceId, targetId, targetKind, targetPoint, radius, damage, flightTicks,
     })),
-    decisions: state.aiDecisions, report: state.report,
+    decisions: state.aiDecisions, intents: state.aiIntents, report: state.report,
   };
   return JSON.stringify(summary);
 }

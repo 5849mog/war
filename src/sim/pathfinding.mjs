@@ -59,15 +59,20 @@ export function blockingBuilding(state, x, y, ignoreIds = new Set()) {
   }) || null;
 }
 
-function canEnter(state, x, y, ignoreIds, fromX, fromY) {
+function canEnter(state, x, y, ignoreIds, fromX, fromY, blockedCells) {
   if (x < 0 || y < 0 || x >= BALANCE.map.width || y >= BALANCE.map.height) return false;
+  if (blockedCells.has(keyOf(x, y))) return false;
   if (blockingBuilding(state, x, y, ignoreIds)) return false;
   const dx = x - fromX; const dy = y - fromY;
-  if (dx && dy && blockingBuilding(state, fromX + dx, fromY, ignoreIds) && blockingBuilding(state, fromX, fromY + dy, ignoreIds)) return false;
+  if (dx && dy) {
+    const blockedX = blockingBuilding(state, fromX + dx, fromY, ignoreIds) || blockedCells.has(keyOf(fromX + dx, fromY));
+    const blockedY = blockingBuilding(state, fromX, fromY + dy, ignoreIds) || blockedCells.has(keyOf(fromX, fromY + dy));
+    if (blockedX && blockedY) return false;
+  }
   return true;
 }
 
-export function searchGrid(state, startX, startY, ignoreIds = new Set()) {
+export function searchGrid(state, startX, startY, ignoreIds = new Set(), blockedCells = new Set()) {
   const width = BALANCE.map.width; const size = width * BALANCE.map.height;
   const startXCell = Math.max(0, Math.min(width - 1, Math.floor(startX)));
   const startYCell = Math.max(0, Math.min(BALANCE.map.height - 1, Math.floor(startY)));
@@ -83,7 +88,7 @@ export function searchGrid(state, startX, startY, ignoreIds = new Set()) {
     const [x, y] = xyOf(current.key);
     for (const [dx, dy, cost] of STEPS) {
       const nx = x + dx; const ny = y + dy;
-      if (!canEnter(state, nx, ny, ignoreIds, x, y)) continue;
+      if (!canEnter(state, nx, ny, ignoreIds, x, y, blockedCells)) continue;
       const key = keyOf(nx, ny); const distance = current.cost + cost;
       if (distance < distances[key] - 1e-9) {
         distances[key] = distance; previous[key] = current.key; heap.push({ key, cost: distance });

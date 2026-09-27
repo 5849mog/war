@@ -16,6 +16,21 @@ export const BALANCE = Object.freeze({
     // Initial placeholder; tune with combat logs after mobile playtests.
     projectileSpeed: 18,
     pathRefreshTicks: 10,
+    unitSeparation: 0.42,
+  }),
+  ai: Object.freeze({
+    // Initial decision weights; tune only from recorded mobile playtests.
+    visionRange: 18,
+    decisionIntervalTicks: 40,
+    switchCooldownTicks: 100,
+    nearbyEnemyRadius: 3.5,
+    holdBaseScore: 35,
+    towerCoverHoldBonus: 20,
+    routeTimePenalty: 2,
+    nearbyEnemyPenalty: 18,
+    routeTowerExposurePenalty: 28,
+    exitTravelSeconds: Object.freeze({ easy: 8, standard: 7.5, challenge: 6.5 }),
+    nearbyEnemyLimit: Object.freeze({ easy: 1, standard: 2, challenge: 3 }),
   }),
   rewards: Object.freeze({
     easy: Object.freeze([60, 180, 260, 360]),

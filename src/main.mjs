@@ -394,8 +394,8 @@ function renderAttackPlanEditor() {
 }
 
 function eventLabel(event) {
-  const entityNames = { core: '基地核心', barracks: '军营', archerTower: '箭塔', machineTower: '机枪台', cannonTower: '火炮台', wall: '城墙', guard: '巡卫', crossbow: '弩手' };
-  if (event.type === 'ai-decision') return `守方 ${entityNames[event.unitId?.split('-').at(-2)] || '驻军'}：${event.decision === 'hold' ? '留守' : '出阵'} · ${event.reason}`;
+  const entityNames = { core: '基地核心', barracks: '军营', archerTower: '箭塔', machineTower: '机枪台', cannonTower: '火炮台', wall: '城墙', guard: '巡卫', striker: '迅击者', ironGuard: '铁卫', breaker: '破垒工', crossbow: '弩手' };
+  if (event.type === 'ai-decision') return `守方 ${entityNames[event.unitType || event.unitId?.split('-').at(-2)] || '驻军'}：${event.returning ? '沿路回防' : event.decision === 'hold' ? '留守' : '出阵'} · ${event.reason}`;
   if (event.type === 'building-destroyed') return `摧毁${entityNames[event.buildingType] || '建筑'} · 权重 +${event.weight}`;
   if (event.type === 'unit-defeated') return `${event.team === 'attacker' ? '进攻单位' : '守军'}离场`;
   if (event.type === 'unit-deployed') return `部署${entityNames[event.unitType] || '单位'}至 (${event.x}, ${event.y})`;
