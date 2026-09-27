@@ -9,7 +9,13 @@ test('export package round-trips a valid save and provides preview metadata', ()
   const parsed = parseSavePackage(packed);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.save.coins, original.coins);
-  assert.deepEqual(parsed.save.attackRoster, original.attackRoster);
+  assert.deepEqual(parsed.save.attackRoster, {
+    guard: 6,
+    striker: 0,
+    ironGuard: 0,
+    breaker: 0,
+    crossbow: 5,
+  });
   assert.equal(parsed.metadata.buildingCount, original.blueprint.buildings.length);
   assert.equal(parsed.metadata.garrisonCount, original.garrison.length);
 });
