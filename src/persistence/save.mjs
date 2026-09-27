@@ -45,6 +45,7 @@ export function migrateSave(snapshot) {
       schemaVersion: SAVE_SCHEMA_VERSION,
       battleReceipts: Array.isArray(snapshot.battleReceipts) ? snapshot.battleReceipts : [],
       nextBattleSequence: Number.isInteger(snapshot.nextBattleSequence) ? snapshot.nextBattleSequence : 1,
+      settings: snapshot.settings && typeof snapshot.settings.sound === 'boolean' ? snapshot.settings : { sound: true, reducedMotion: false },
     };
   }
   return null;
@@ -77,8 +78,11 @@ export async function saveSnapshot(snapshot) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
     const store = tx.objectStore(STORE);
-    store.put(snapshot, 'backup');
-    store.put(snapshot, SAVE_KEY);
+    const previous = store.get(SAVE_KEY);
+    previous.onsuccess = () => {
+      if (previous.result) store.put(previous.result, 'backup');
+      store.put(snapshot, SAVE_KEY);
+    };
     tx.oncomplete = () => { db.close(); resolve(true); };
     tx.onerror = () => { db.close(); reject(tx.error); };
     tx.onabort = () => { db.close(); reject(tx.error || new Error('Save transaction aborted')); };
