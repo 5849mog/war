@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#354138" />
-    <meta name="description" content="WAR（工作名）原创基地攻防游戏的 M0 可运行切片。" />
+    <meta name="description" content="WAR（工作名）原创基地攻防游戏的 M1 可运行建造与驻军切片。" />
     <title>WAR · 工匠城邦（工作名）</title>
     <link rel="stylesheet" href="./src/ui/app.css" />
   </head>
@@ -17,7 +17,7 @@
             <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
             <div><div class="brand-title">WAR <span>工作名</span></div><div class="brand-caption">工匠城邦 · 美术与世界观占位</div></div>
           </div>
-          <div class="mobile-badge"><i></i> M0 · 地图样板</div>
+          <div class="mobile-badge"><i></i> M1 · 建造与驻军</div>
         </header>
         <div class="map-label"><span class="label-dot"></span>基地蓝图 <small>固定 2.5D 斜视</small></div>
         <div class="camera-tools" aria-label="地图视角工具">
@@ -36,7 +36,13 @@
           <div class="eyebrow">单人基地 · 本地原型</div>
           <div class="coin-card"><span class="coin-icon">✦</span><div><small>金币</small><strong id="coinCount">2,500</strong></div><span class="coin-tag">初始存档</span></div>
         </div>
+        <nav class="mode-tabs" aria-label="基地面板">
+          <button class="mode-tab active" data-mode="overview" aria-pressed="true">总览</button>
+          <button class="mode-tab" data-mode="build" aria-pressed="false">建造</button>
+          <button class="mode-tab" data-mode="garrison" aria-pressed="false">驻军</button>
+        </nav>
 
+        <div id="overviewPane" class="mode-pane">
         <section class="panel-section selected-section">
           <div class="section-heading"><h1 id="selectionTitle">地图总览</h1><span class="status-chip" id="zoneChip">28 × 28</span></div>
           <p id="selectionDescription" class="section-copy">完整缩放视图 · 24 × 24 建造区 · 外缘为部署环</p>
@@ -46,21 +52,61 @@
         <section class="panel-section">
           <div class="section-heading"><h2>蓝图一览</h2><span class="tiny-caption">可在 M1 编辑</span></div>
           <div class="structure-list">
-            <div class="structure-row"><span class="structure-icon core-icon">✧</span><span>基地核心<small>3 × 3 · L1</small></span><b>1</b></div>
-            <div class="structure-row"><span class="structure-icon tent-icon">⌂</span><span>军营<small>2 × 2 · L1</small></span><b>1</b></div>
-            <div class="structure-row"><span class="structure-icon tower-icon">♜</span><span>箭塔<small>2 × 2 · L1</small></span><b>1</b></div>
-            <div class="structure-row"><span class="structure-icon wall-icon">▤</span><span>木墙<small>独立墙段 · 400 HP</small></span><b>12</b></div>
+            <div class="structure-row"><span class="structure-icon core-icon">✧</span><span>基地核心<small id="coreSummary">3 × 3 · L1</small></span><b id="coreCount">1</b></div>
+            <div class="structure-row"><span class="structure-icon tent-icon">⌂</span><span>军营<small id="barracksSummary">2 × 2 · L1</small></span><b id="barracksCount">1</b></div>
+            <div class="structure-row"><span class="structure-icon tower-icon">♜</span><span>箭塔<small id="arrowSummary">2 × 2 · L1</small></span><b id="arrowCount">1</b></div>
+            <div class="structure-row"><span class="structure-icon tower-icon">◉</span><span>机枪台<small>2 × 2 · 连续压制</small></span><b id="machineCount">0</b></div>
+            <div class="structure-row"><span class="structure-icon tower-icon">●</span><span>火炮台<small>2 × 2 · 范围攻击</small></span><b id="cannonCount">0</b></div>
+            <div class="structure-row"><span class="structure-icon wall-icon">▤</span><span>城墙<small id="wallSummary">木墙 · 每段独立耐久</small></span><b id="wallCount">12</b></div>
           </div>
         </section>
 
         <section class="panel-section garrison-section">
-          <div class="section-heading"><h2>驻军编组</h2><span class="tiny-caption">2 名弩手</span></div>
+          <div class="section-heading"><h2>驻军编组</h2><span class="tiny-caption" id="garrisonCount">2 名守军</span></div>
           <div class="garrison-mini"><span class="mini-unit">➶</span><span class="mini-unit">➶</span><div><strong>站位已保存</strong><small>当前版本没有防守演练入口</small></div></div>
           <p class="quiet-note">驻军可随基地蓝图保存与调整；首发约定下不会用于防守战斗。</p>
         </section>
+        </div>
+
+        <div id="buildPane" class="mode-pane" hidden>
+          <section class="panel-section">
+            <div class="section-heading"><h2>新建设施</h2><span class="tiny-caption">单击类型，再点地图</span></div>
+            <p class="section-copy">确认前不会扣费。预览会标出占地和冲突位置。</p>
+            <div id="buildCatalog" class="build-catalog"></div>
+          </section>
+          <section class="panel-section editor-section">
+            <div class="section-heading"><h2>编辑操作</h2><button id="toggleWallSet" class="text-button" aria-pressed="false">批量选墙</button></div>
+            <div id="editStatus" class="editor-status">点地图上的建筑查看等级、造价和可用操作。</div>
+            <div id="selectedDetails" class="selected-details" hidden></div>
+            <div id="wallSetDetails" class="selected-details" hidden></div>
+            <div id="placementPreview" class="placement-preview" hidden>
+              <strong id="placementTitle"></strong><span id="placementMessage"></span>
+              <div class="editor-actions"><button id="confirmPlacement" class="primary-button">确认放置</button><button id="cancelPlacement" class="secondary-button">取消</button></div>
+            </div>
+            <div id="selectedActions" class="editor-actions"></div>
+          </section>
+        </div>
+
+        <div id="garrisonPane" class="mode-pane" hidden>
+          <section class="panel-section">
+            <div class="section-heading"><h2>驻军站位</h2><span class="tiny-caption" id="garrisonPopulation">人口 4 / 16</span></div>
+            <p class="section-copy">驻军随蓝图保存与调整。首发不含自家基地防守战斗。</p>
+            <div id="garrisonRoster" class="garrison-roster"></div>
+          </section>
+          <section class="panel-section">
+            <div class="section-heading"><h2>添加守军</h2><span class="tiny-caption">五种首发兵种</span></div>
+            <div id="garrisonCatalog" class="build-catalog compact-catalog"></div>
+            <div id="garrisonStatus" class="editor-status">选择兵种后点一个空格安排站位。</div>
+            <div id="garrisonPreview" class="placement-preview" hidden>
+              <strong id="garrisonPreviewTitle"></strong><span id="garrisonPreviewMessage"></span>
+              <div class="editor-actions"><button id="confirmGarrison" class="primary-button">保存站位</button><button id="cancelGarrison" class="secondary-button">取消</button></div>
+            </div>
+            <div id="garrisonActions" class="editor-actions"></div>
+          </section>
+        </div>
 
         <section class="system-card">
-          <div class="system-header"><span class="system-led"></span><strong>原型运行状态</strong><span class="system-version">M0</span></div>
+          <div class="system-header"><span class="system-led"></span><strong>原型运行状态</strong><span class="system-version">M1</span></div>
           <div id="saveStatus" class="system-line">正在读取本机存档…</div>
           <div class="sim-row"><span>模拟步长</span><strong>50 ms <small>· 20 tick/s</small></strong></div>
           <div class="sim-row"><span>确定性沙盘</span><strong id="simStatus">待验证</strong></div>
