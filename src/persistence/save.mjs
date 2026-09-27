@@ -3,6 +3,7 @@ import { BALANCE } from '../config/balance.mjs';
 const DB_NAME = 'war-save';
 const STORE = 'snapshots';
 const SAVE_KEY = 'player';
+export const SAVE_SCHEMA_VERSION = 2;
 
 const wallCoords = [
   ...Array.from({ length: 5 }, (_, i) => [11 + i, 11]).filter(([x, y]) => x !== 13 || y !== 11),
@@ -19,7 +20,7 @@ export function createInitialSave() {
     ...wallCoords.map(([x, y], index) => ({ id: `wall-${String(index + 1).padStart(2, '0')}`, type: 'wall', material: 'wood', level: 1, x, y, paidCost: 0 })),
   ];
   return {
-    schemaVersion: 1,
+    schemaVersion: SAVE_SCHEMA_VERSION,
     contentVersion: BALANCE.contentVersion,
     coins: BALANCE.economy.initialCoins,
     blueprint: { mapVersion: 1, buildings },
@@ -31,7 +32,22 @@ export function createInitialSave() {
     ],
     settings: { sound: true, reducedMotion: false },
     completedChallenges: [],
+    battleReceipts: [],
+    nextBattleSequence: 1,
   };
+}
+
+export function migrateSave(snapshot) {
+  if (snapshot?.schemaVersion === SAVE_SCHEMA_VERSION) return snapshot;
+  if (snapshot?.schemaVersion === 1) {
+    return {
+      ...snapshot,
+      schemaVersion: SAVE_SCHEMA_VERSION,
+      battleReceipts: Array.isArray(snapshot.battleReceipts) ? snapshot.battleReceipts : [],
+      nextBattleSequence: Number.isInteger(snapshot.nextBattleSequence) ? snapshot.nextBattleSequence : 1,
+    };
+  }
+  return null;
 }
 
 function openDatabase() {
@@ -71,7 +87,11 @@ export async function saveSnapshot(snapshot) {
 
 export async function loadOrCreateSave() {
   const existing = await loadSave();
-  if (existing?.schemaVersion === 1) return existing;
+  const migrated = migrateSave(existing);
+  if (migrated) {
+    if (migrated !== existing) await saveSnapshot(migrated);
+    return migrated;
+  }
   const initial = createInitialSave();
   await saveSnapshot(initial);
   return initial;

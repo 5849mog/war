@@ -80,13 +80,14 @@ function drawTroop(ctx, troop, viewport, camera) {
   const p = worldToScreen(troop.x + .5, troop.y + .5, viewport, camera, BALANCE.map);
   const scale = fitScale(viewport, BALANCE.map) * camera.zoom;
   ctx.fillStyle = '#394a3d'; ctx.beginPath(); ctx.ellipse(p.x, p.y + 3 * scale, 6 * scale, 3 * scale, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#4ca9b7'; ctx.strokeStyle = '#e8d9ac'; ctx.lineWidth = Math.max(1, scale);
+  const color = troop.team === 'attacker' ? '#e58a54' : '#4ca9b7';
+  ctx.fillStyle = color; ctx.strokeStyle = '#f4e6c6'; ctx.lineWidth = Math.max(1, scale);
   ctx.beginPath(); ctx.arc(p.x, p.y - 3 * scale, 4.5 * scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
 }
 
 function drawPreview(ctx, preview, viewport, camera) {
   if (!preview) return;
-  const [width, height] = preview.type === 'core' ? [3, 3] : preview.type === 'wall' || preview.type === 'garrison' ? [1, 1] : [2, 2];
+  const [width, height] = preview.type === 'core' ? [3, 3] : preview.type === 'wall' || preview.type === 'garrison' || preview.type === 'deployment' ? [1, 1] : [2, 2];
   const valid = preview.valid !== false;
   const fill = valid ? 'rgba(190,235,177,.32)' : 'rgba(230,139,116,.3)';
   const stroke = valid ? '#e8f3be' : '#ffd1bb';
@@ -128,4 +129,44 @@ export function drawMap(ctx, canvas, save, camera, selectedCell, interaction = {
   const items = [...save.blueprint.buildings].sort((a, b) => (a.x + a.y) - (b.x + b.y));
   for (const building of items) building.type === 'wall' ? drawWall(ctx, building, viewport, camera) : drawBuilding(ctx, building, viewport, camera);
   for (const troop of save.garrison) drawTroop(ctx, troop, viewport, camera);
+}
+
+function drawHealthBar(ctx, x, y, width, ratio, color) {
+  ctx.fillStyle = 'rgba(43,52,40,.82)'; ctx.fillRect(x - width / 2, y, width, 3);
+  ctx.fillStyle = color; ctx.fillRect(x - width / 2, y, width * Math.max(0, Math.min(1, ratio)), 3);
+}
+
+export function drawBattle(ctx, canvas, battle, camera, selectedCell, interaction = {}) {
+  const entities = [
+    ...battle.defenders.filter((unit) => unit.alive).map((unit) => ({ ...unit, x: unit.x - .5, y: unit.y - .5 })),
+    ...battle.attackers.filter((unit) => unit.alive).map((unit) => ({ ...unit, x: unit.x - .5, y: unit.y - .5 })),
+  ];
+  const saveView = {
+    blueprint: { buildings: battle.buildings.filter((building) => !building.destroyed) },
+    garrison: entities,
+  };
+  drawMap(ctx, canvas, saveView, camera, selectedCell, interaction);
+  const viewport = { width: canvas.clientWidth, height: canvas.clientHeight };
+  const scale = fitScale(viewport, BALANCE.map) * camera.zoom;
+  for (const building of battle.buildings.filter((item) => !item.destroyed)) {
+    const [width, height] = building.type === 'core' ? [3, 3] : building.type === 'wall' ? [1, 1] : [2, 2];
+    const point = worldToScreen(building.x + width / 2, building.y + height / 2, viewport, camera, BALANCE.map);
+    drawHealthBar(ctx, point.x, point.y + 7 * scale, 21 * scale, building.hp / building.maxHp, '#83c274');
+  }
+  for (const unit of entities) {
+    const point = worldToScreen(unit.x + .5, unit.y + .5, viewport, camera, BALANCE.map);
+    drawHealthBar(ctx, point.x, point.y - 10 * scale, 11 * scale, unit.hp / unit.maxHp, unit.team === 'attacker' ? '#efab63' : '#8ad4d2');
+  }
+  for (const projectile of battle.projectiles) {
+    const target = battle.buildings.find((item) => item.id === projectile.targetId)
+      || battle.attackers.concat(battle.defenders).find((item) => item.id === projectile.targetId);
+    const source = battle.buildings.find((item) => item.id === projectile.sourceId)
+      || battle.attackers.concat(battle.defenders).find((item) => item.id === projectile.sourceId);
+    if (!target || !source) continue;
+    const from = source.type && BALANCE.buildings[source.type] ? { x: source.x + (source.type === 'core' ? 1.5 : source.type === 'wall' ? .5 : 1), y: source.y + (source.type === 'core' ? 1.5 : source.type === 'wall' ? .5 : 1) } : { x: source.x, y: source.y };
+    const to = target.type && BALANCE.buildings[target.type] ? { x: target.x + (target.type === 'core' ? 1.5 : target.type === 'wall' ? .5 : 1), y: target.y + (target.type === 'core' ? 1.5 : target.type === 'wall' ? .5 : 1) } : { x: target.x, y: target.y };
+    const progress = projectile.initialFlightTicks ? 1 - projectile.flightTicks / projectile.initialFlightTicks : 1;
+    const position = worldToScreen(from.x + (to.x - from.x) * progress, from.y + (to.y - from.y) * progress, viewport, camera, BALANCE.map);
+    ctx.fillStyle = '#f7df9c'; ctx.beginPath(); ctx.arc(position.x, position.y - 2 * scale, Math.max(1.4, 2 * scale), 0, Math.PI * 2); ctx.fill();
+  }
 }

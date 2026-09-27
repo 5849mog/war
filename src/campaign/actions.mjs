@@ -179,6 +179,26 @@ export function removeGarrison(save, id) {
   return success(next, '驻军已从蓝图移除');
 }
 
+export function allocateBattleId(save) {
+  const next = cloneSave(save);
+  const sequence = Number.isInteger(next.nextBattleSequence) && next.nextBattleSequence > 0 ? next.nextBattleSequence : 1;
+  next.nextBattleSequence = sequence + 1;
+  return {
+    ...success(next, `已分配战斗编号 ${sequence}`),
+    battleId: `battle-${String(sequence).padStart(6, '0')}`,
+  };
+}
+
+export function claimBattleReward(save, report) {
+  if (!report?.battleId || !Number.isInteger(report.reward) || report.reward < 0) return failure('战报奖励信息无效');
+  const receipts = Array.isArray(save.battleReceipts) ? save.battleReceipts : [];
+  if (receipts.includes(report.battleId)) return failure('这场战斗的奖励已经领取');
+  const next = cloneSave(save);
+  next.coins += report.reward;
+  next.battleReceipts = [...receipts, report.battleId];
+  return success(next, `金币 +${report.reward} 已写入存档`);
+}
+
 export function validateBlueprint(save) {
   const errors = [];
   const buildings = save.blueprint.buildings;
