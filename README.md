@@ -82,6 +82,7 @@ npm test
 - 候选实现：原创程序化 2.5D 建筑、四种独立墙材纹理和五兵种轮廓；前后遮挡排序；静态地图缓存；守军出阵路径预览。合成原创短音效、静音和减弱动效设置、首次四步引导、校验码保护的 JSON 导入/导出及导入前预览；导入事务会将当前存档保留为备份。新增 landscape manifest 与静态 dist 构建脚本。
 - 资产记录：docs/ASSET_SOURCES.md 标记原创 Canvas/SVG、运行时合成音效和系统字体来源；WAR 与“工匠城邦”仍是占位。
 - 启动/构建：开发预览 npm run dev；生产候选 npm run build 后服务 dist/；自动化 npm test。
+- GitHub Pages：新增 `.github/workflows/pages.yml`，分支推送/PR 运行测试与构建；只有 `main` 推送或在 `main` 手动运行时才部署 `dist/`。仓库 Settings → Pages → Build and deployment → Source 需选 GitHub Actions。工作流尚未合入默认分支前不会自动发布网站。
 - 对应场景：新增存档导入/导出、损坏校验和无效数据拒绝测试；M4 基线覆盖 E01–E03、F02、F07–F08 和确定性规则夹具。
 - 验证状态：修正编队规范化断言后，`npm test` 通过 47/47；`npm run build` 成功，输出 15 个 JavaScript 模块。开发服务的页面、主模块、渲染器、manifest 与 SVG 请求均返回 HTTP 200。浏览器自动化工具拦截了本地地址，真实浏览器触控、手机横屏帧率（30 FPS）仍未验收；没有 M5 运行截图或录屏，既有 M0 布局图也不是运行截图。此 PR 保持草稿，不能标为可发布首版。
 - 已知问题：M5 视觉仍是可审查的原创几何/SVG 候选，未做正式立绘、动画帧和手机细节校色；性能数据与初玩者全流程仍待真机。玩家自建基地/驻军仍只可编辑保存，首发用途不足已明确记录，且未擅自增加战斗模式。
