@@ -107,10 +107,13 @@
         </div>
 
         <div id="battlePane" class="mode-pane" hidden>
-          <section class="panel-section">
-            <div class="section-heading"><h2>E1 · 四门木环</h2><span class="tiny-caption">轻松 · AI 基地</span></div>
-            <p class="section-copy">侦察显示核心、箭塔、机枪台、12 段木墙与驻军。只有你开始部署后，守方才响应；不含玩家基地防守战斗。</p>
-            <div id="battlePhaseLabel" class="editor-status">可重复挑战 · 胜负由固定步长战斗结算。</div>
+          <section id="battlePlanningPanel" class="panel-section">
+            <div class="section-heading"><h2>侦察与配兵</h2><span id="levelDifficulty" class="tiny-caption">轻松 · AI 基地</span></div>
+            <label class="level-picker-row" for="battleLevelSelect"><span>选择基地</span><select id="battleLevelSelect"></select></label>
+            <p id="battleLevelDetails" class="section-copy">选择关卡查看驻军、建筑构成和可发现的突破方向。</p>
+            <div class="section-heading plan-heading"><h2>进攻编队</h2><span id="attackPlanPopulation" class="tiny-caption"></span></div>
+            <div id="attackPlanEditor" class="attack-plan-list"></div>
+            <div id="battlePhaseLabel" class="editor-status">可重复挑战 · 首次部署后计时与守军响应。</div>
             <button id="prepareBattle" class="primary-button">开始进攻</button>
           </section>
           <div id="battleSessionPanel" hidden>
@@ -151,7 +154,7 @@
         </div>
 
         <section class="system-card">
-          <div class="system-header"><span class="system-led"></span><strong>原型运行状态</strong><span class="system-version">M1</span></div>
+          <div class="system-header"><span class="system-led"></span><strong>原型运行状态</strong><span class="system-version">M3</span></div>
           <div id="saveStatus" class="system-line">正在读取本机存档…</div>
           <div class="sim-row"><span>模拟步长</span><strong>50 ms <small>· 20 tick/s</small></strong></div>
           <div class="sim-row"><span>确定性沙盘</span><strong id="simStatus">待验证</strong></div>

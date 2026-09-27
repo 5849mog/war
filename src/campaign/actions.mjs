@@ -12,6 +12,21 @@ export function populationUsed(roster) {
   return Object.entries(roster).reduce((total, [type, count]) => total + (BALANCE.units[type]?.population || 0) * count, 0);
 }
 
+export function setAttackRoster(save, roster) {
+  if (!roster || typeof roster !== 'object' || Array.isArray(roster)) return failure('进攻编队数据无效');
+  for (const [type, count] of Object.entries(roster)) {
+    if (!BALANCE.units[type]) return failure(`未知进攻兵种：${type}`);
+    if (!Number.isInteger(count) || count < 0) return failure(`${type} 数量必须为非负整数`);
+    if (count > 0 && !save.unlocks.includes(type)) return failure(`${type} 尚未解锁`);
+  }
+  const capacity = BALANCE.progression.barracksPopulation[barracksLevelOf(save)];
+  const used = populationUsed(roster);
+  if (used > capacity) return failure(`进攻人口 ${used} 超过军营上限 ${capacity}`);
+  const next = cloneSave(save);
+  next.attackRoster = Object.fromEntries(Object.keys(BALANCE.units).map((type) => [type, roster[type] || 0]));
+  return success(next, `进攻编队已设置 · 人口 ${used}/${capacity}`);
+}
+
 export function cellOccupant(save, x, y, exceptId = null) {
   return save.blueprint.buildings.find((building) => {
     if (building.id === exceptId) return false;

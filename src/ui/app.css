@@ -108,6 +108,18 @@ h2 { font-size: 13px; line-height: 1.25; font-weight: 800; letter-spacing: .01em
 .attack-unit:disabled { opacity: .48; cursor: not-allowed; }
 .attack-unit strong { display: block; font-size: 10px; }.attack-unit small { display: block; margin-top: 2px; color: #758171; font-size: 9px; }
 .battle-control-row { display: flex; gap: 6px; margin-top: 8px; }
+.level-picker-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; color: #717d6c; font-size: 10px; font-weight: 700; }
+.level-picker-row select { flex: 1; min-width: 0; height: 38px; padding: 0 8px; border: 1px solid #d9ddcc; border-radius: 8px; background: #f8f6ed; color: #465544; font: inherit; }
+.plan-heading { margin-top: 9px; }
+.attack-plan-list { display: grid; gap: 3px; margin-top: 5px; }
+.attack-plan-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; min-height: 40px; }
+.attack-plan-name { min-width: 0; }
+.attack-plan-name strong { display: block; font-size: 11px; }
+.attack-plan-name small { display: block; margin-top: 2px; color: #838c7d; font-size: 9px; }
+.roster-stepper { display: flex; align-items: center; gap: 5px; }
+.roster-stepper b { min-width: 18px; text-align: center; font-size: 12px; }
+.roster-step { width: 40px; height: 40px; border: 1px solid #dcd8c9; border-radius: 8px; background: #f6f3e9; color: #56684e; font-size: 20px; cursor: pointer; }
+.roster-step:disabled { opacity: .38; cursor: default; }
 .battle-control-row > button { flex: 1; min-width: 0; padding-inline: 5px; }
 .report-stars { color: #a47a38; font-size: 18px; letter-spacing: 2px; }
 .event-feed { display: grid; gap: 4px; max-height: 112px; overflow-y: auto; margin: 7px 0 0; padding: 0 0 0 18px; color: #657161; font-size: 9px; line-height: 1.35; }

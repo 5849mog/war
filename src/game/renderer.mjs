@@ -162,9 +162,9 @@ export function drawBattle(ctx, canvas, battle, camera, selectedCell, interactio
       || battle.attackers.concat(battle.defenders).find((item) => item.id === projectile.targetId);
     const source = battle.buildings.find((item) => item.id === projectile.sourceId)
       || battle.attackers.concat(battle.defenders).find((item) => item.id === projectile.sourceId);
-    if (!target || !source) continue;
+    if (!source || (!target && !projectile.targetPoint)) continue;
     const from = source.type && BALANCE.buildings[source.type] ? { x: source.x + (source.type === 'core' ? 1.5 : source.type === 'wall' ? .5 : 1), y: source.y + (source.type === 'core' ? 1.5 : source.type === 'wall' ? .5 : 1) } : { x: source.x, y: source.y };
-    const to = target.type && BALANCE.buildings[target.type] ? { x: target.x + (target.type === 'core' ? 1.5 : target.type === 'wall' ? .5 : 1), y: target.y + (target.type === 'core' ? 1.5 : target.type === 'wall' ? .5 : 1) } : { x: target.x, y: target.y };
+    const to = projectile.targetPoint || (target.type && BALANCE.buildings[target.type] ? { x: target.x + (target.type === 'core' ? 1.5 : target.type === 'wall' ? .5 : 1), y: target.y + (target.type === 'core' ? 1.5 : target.type === 'wall' ? .5 : 1) } : { x: target.x, y: target.y });
     const progress = projectile.initialFlightTicks ? 1 - projectile.flightTicks / projectile.initialFlightTicks : 1;
     const position = worldToScreen(from.x + (to.x - from.x) * progress, from.y + (to.y - from.y) * progress, viewport, camera, BALANCE.map);
     ctx.fillStyle = '#f7df9c'; ctx.beginPath(); ctx.arc(position.x, position.y - 2 * scale, Math.max(1.4, 2 * scale), 0, Math.PI * 2); ctx.fill();

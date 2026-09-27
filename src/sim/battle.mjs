@@ -155,7 +155,7 @@ export function canUnitSeeTarget(state, unit, target) {
   return hasLineOfSight(state, { x: unit.x, y: unit.y }, to, ignoreId, unit.team === 'defender' && unit.type === 'crossbow');
 }
 
-function attackerTarget(state, unit) {
+export function chooseAttackerTarget(state, unit) {
   const spec = BALANCE.units[unit.type];
   if (spec.range > 1) {
     const visibleDefenders = state.defenders.filter((defender) => defender.alive
@@ -177,7 +177,12 @@ function attackerTarget(state, unit) {
     const expectedAttackSeconds = building.hp / Math.max(1, spec.damage * wallMultiplier) * spec.interval;
     return { target: building, kind: 'building', route: approach.path, cost: approach.cost / spec.speed + expectedAttackSeconds };
   }).filter(Boolean).sort((a, b) => a.cost - b.cost || byId(a.target, b.target));
-  return options[0] || null;
+  const preferred = unit.type === 'breaker'
+    ? options.filter((option) => option.target.type === 'wall')
+    : ['striker', 'ironGuard'].includes(unit.type)
+      ? options.filter((option) => ['archerTower', 'machineTower', 'cannonTower'].includes(option.target.type))
+      : [];
+  return (preferred.length ? preferred : options)[0] || null;
 }
 
 function setRoute(state, unit, choice) {
@@ -237,7 +242,7 @@ function updateAttacker(state, unit, hits) {
   const shouldRefresh = !unit.targetId || unit.nextPathTick <= state.tick
     || !state.buildings.some((building) => active(building) && building.id === unit.targetId);
   if (shouldRefresh || !unit.path.length || unit.pathIndex >= unit.path.length) {
-    choice = attackerTarget(state, unit);
+    choice = chooseAttackerTarget(state, unit);
     if (choice?.kind === 'building') setRoute(state, unit, choice);
     else if (choice?.kind === 'unit') { unit.targetId = choice.target.id; unit.path = []; }
     else { unit.targetId = null; unit.path = []; }
@@ -278,15 +283,25 @@ function updateDefender(state, unit, hits) {
   if (unit.cooldownTicks === 0) fireFromUnit(state, unit, target, 'unit', hits);
 }
 
-function towerTarget(state, tower) {
+export function chooseTowerTarget(state, tower) {
   const spec = BALANCE.buildings[tower.type];
   const origin = buildingCenter(tower);
   const inRange = state.attackers.filter((unit) => unit.alive
     && Math.hypot(unit.x - origin.x, unit.y - origin.y) <= spec.range + 1e-9
+    && (!spec.minRange || Math.hypot(unit.x - origin.x, unit.y - origin.y) >= spec.minRange - 1e-9)
     && hasLineOfSight(state, origin, { x: unit.x, y: unit.y }, null, true));
   if (tower.type === 'machineTower' && tower.currentTargetId) {
     const sticky = inRange.find((unit) => unit.id === tower.currentTargetId);
     if (sticky) return sticky;
+  }
+  if (tower.type === 'cannonTower') {
+    const candidates = inRange.map((unit) => ({
+      unit,
+      count: inRange.filter((other) => Math.hypot(other.x - unit.x, other.y - unit.y) <= spec.splash + 1e-9
+        && hasLineOfSight(state, { x: unit.x, y: unit.y }, { x: other.x, y: other.y })).length,
+      distance: Math.hypot(unit.x - origin.x, unit.y - origin.y),
+    })).sort((a, b) => b.count - a.count || a.distance - b.distance || byId(a.unit, b.unit));
+    return candidates[0]?.unit || null;
   }
   return inRange.sort((a, b) => {
     const estimateA = Math.hypot(a.x - origin.x, a.y - origin.y) / BALANCE.units[a.type].speed;
@@ -295,24 +310,36 @@ function towerTarget(state, tower) {
   })[0] || null;
 }
 
+export function calculateTowerDamage(type, level, unitType) {
+  const spec = BALANCE.buildings[type];
+  const unit = BALANCE.units[unitType];
+  if (!spec?.hit || !unit) return 0;
+  const heavy = unitType === 'ironGuard';
+  return Math.max(1, spec.hit[level - 1] * (heavy ? spec.vsHeavy : spec.vsLight) * (1 - unit.defense));
+}
+
 function updateTower(state, tower) {
-  const target = towerTarget(state, tower);
+  const target = chooseTowerTarget(state, tower);
   if (!target) { tower.currentTargetId = null; tower.cooldownTicks = 0; return; }
   tower.currentTargetId = target.id;
   if (tower.cooldownTicks > 0) tower.cooldownTicks -= 1;
   if (tower.cooldownTicks > 0) return;
   const spec = BALANCE.buildings[tower.type];
-  const heavy = target.type === 'ironGuard';
-  const versus = heavy ? spec.vsHeavy : spec.vsLight;
-  const defence = BALANCE.units[target.type].defense;
-  const damage = Math.max(1, spec.hit[tower.level - 1] * versus * (1 - defence));
+  const damage = calculateTowerDamage(tower.type, tower.level, target.type);
   const origin = buildingCenter(tower);
   const distance = Math.hypot(target.x - origin.x, target.y - origin.y);
   const flightTicks = Math.max(1, Math.ceil(distance / BALANCE.battle.projectileSpeed * TICKS_PER_SECOND));
-  state.projectiles.push({
+  const projectile = {
     id: `${state.battleId}-shot-${String(state.projectiles.length + state.events.length + 1).padStart(5, '0')}`,
-    sourceId: tower.id, targetId: target.id, targetKind: 'unit', damage, flightTicks, initialFlightTicks: flightTicks,
-  });
+    sourceId: tower.id, targetId: target.id,
+    targetKind: tower.type === 'cannonTower' ? 'area' : 'unit',
+    damage, flightTicks, initialFlightTicks: flightTicks,
+  };
+  if (tower.type === 'cannonTower') {
+    projectile.targetPoint = { x: target.x, y: target.y };
+    projectile.radius = spec.splash;
+  }
+  state.projectiles.push(projectile);
   tower.cooldownTicks = intervalTicks(spec.interval);
   commandEvent(state, 'projectile-fired', { sourceId: tower.id, targetId: target.id, travelTicks: flightTicks });
 }
@@ -322,6 +349,16 @@ function resolveProjectiles(state, hits) {
   for (const projectile of state.projectiles) {
     projectile.flightTicks -= 1;
     if (projectile.flightTicks > 0) { remaining.push(projectile); continue; }
+    if (projectile.targetKind === 'area') {
+      const affected = state.attackers.filter((unit) => unit.alive
+        && Math.hypot(unit.x - projectile.targetPoint.x, unit.y - projectile.targetPoint.y) <= projectile.radius + 1e-9
+        && hasLineOfSight(state, projectile.targetPoint, { x: unit.x, y: unit.y }));
+      for (const unit of affected) {
+        queueHit(hits, unit.id, calculateTowerDamage('cannonTower', state.buildings.find((item) => item.id === projectile.sourceId)?.level || 1, unit.type), projectile.sourceId, 'cannon-splash');
+      }
+      commandEvent(state, 'cannon-impact', { projectileId: projectile.id, x: projectile.targetPoint.x, y: projectile.targetPoint.y, affectedUnitIds: affected.map((unit) => unit.id).sort() });
+      continue;
+    }
     const target = projectile.targetKind === 'building'
       ? state.buildings.find((item) => item.id === projectile.targetId && active(item))
       : state.attackers.concat(state.defenders).find((item) => item.id === projectile.targetId && item.alive);
@@ -372,7 +409,7 @@ export function advanceBattleTick(state, commands = []) {
 
   for (const unit of state.attackers.filter((item) => item.alive).sort(byId)) updateAttacker(state, unit, hits);
   for (const unit of state.defenders.filter((item) => item.alive).sort(byId)) updateDefender(state, unit, hits);
-  for (const tower of state.buildings.filter((item) => active(item) && ['archerTower', 'machineTower'].includes(item.type)).sort(byId)) updateTower(state, tower);
+  for (const tower of state.buildings.filter((item) => active(item) && ['archerTower', 'machineTower', 'cannonTower'].includes(item.type)).sort(byId)) updateTower(state, tower);
 
   applyHits(state, hits);
   if (activeBuildingCount(state) === 0) finishBattle(state, 'all-buildings-destroyed');
@@ -395,7 +432,9 @@ export function battleDigest(state) {
     buildings: state.buildings.map(({ id, hp, destroyed }) => ({ id, hp, destroyed })).sort(byId),
     attackers: state.attackers.map(({ id, type, x, y, hp, alive }) => ({ id, type, x, y, hp, alive })).sort(byId),
     defenders: state.defenders.map(({ id, type, x, y, hp, alive }) => ({ id, type, x, y, hp, alive })).sort(byId),
-    projectiles: state.projectiles.map(({ id, sourceId, targetId, damage, flightTicks }) => ({ id, sourceId, targetId, damage, flightTicks })),
+    projectiles: state.projectiles.map(({ id, sourceId, targetId, targetKind, targetPoint, radius, damage, flightTicks }) => ({
+      id, sourceId, targetId, targetKind, targetPoint, radius, damage, flightTicks,
+    })),
     decisions: state.aiDecisions, report: state.report,
   };
   return JSON.stringify(summary);

@@ -4,13 +4,13 @@ import { loadOrCreateSave, saveSnapshot } from './persistence/save.mjs';
 import { replaySimulation, simulationDigest } from './sim/engine.mjs';
 import { drawBattle, drawMap } from './game/renderer.mjs';
 import { fitScale, screenToCell } from './game/projection.mjs';
-import { createE1Level } from './config/levels.mjs';
+import { createE1Level, getLevel, LEVELS } from './config/levels.mjs';
 import { advanceBattleTick, applyBattleCommands, createBattle } from './sim/battle.mjs';
 import { isDeploymentCell } from './sim/pathfinding.mjs';
 import {
   addGarrison, allocateBattleId, canPlaceBuilding, claimBattleReward, getBuildingLabel, getCoreLimits, getFootprint, getNextUpgrade,
   moveBuilding, moveGarrison, placeBuilding, removeGarrison, sellBuilding,
-  upgradeBuilding, upgradeWalls,
+  setAttackRoster, upgradeBuilding, upgradeWalls,
 } from './campaign/actions.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -34,7 +34,9 @@ const UNIT_OPTIONS = [
 let save;
 let currentMode = 'overview';
 const E1_LEVEL = createE1Level();
-let battleState = createBattle({ seed: 498321, level: E1_LEVEL, battleId: 'E1-preview' });
+let selectedLevelId = 'E1';
+let selectedLevel = structuredClone(E1_LEVEL);
+let battleState = createBattle({ seed: 498321, level: selectedLevel, battleId: 'E1-preview' });
 let battleIsPreview = true;
 let deployType = 'guard';
 let deployCandidate = null;
@@ -311,8 +313,8 @@ function updateGarrisonPane() {
 
 function renderBattleUnitSelect() {
   const target = $('battleUnitSelect');
-  const unitNames = { guard: '巡卫', crossbow: '弩手' };
-  const types = ['guard', 'crossbow'];
+  const unitNames = Object.fromEntries(UNIT_OPTIONS.map((option) => [option.type, option.name]));
+  const types = UNIT_OPTIONS.map((option) => option.type);
   const signature = `${battleIsPreview}:${deployType}:${types.map((type) => battleState.inventory[type] || 0).join(',')}`;
   if (signature === lastRosterSignature) return;
   lastRosterSignature = signature;
@@ -324,7 +326,8 @@ function renderBattleUnitSelect() {
     button.type = 'button';
     button.className = `attack-unit${deployType === type ? ' selected' : ''}`;
     button.disabled = remaining <= 0 || battleState.phase === 'complete';
-    button.innerHTML = `<span class="mini-unit">${type === 'crossbow' ? '➶' : '●'}</span><span><strong>${unitNames[type]}</strong><small>预备 ${remaining} · 人口 ${unit.population}</small></span>`;
+    const glyph = type === 'crossbow' ? '➶' : type === 'breaker' ? '⌁' : type === 'ironGuard' ? '⬟' : type === 'striker' ? '➤' : '●';
+    button.innerHTML = `<span class="mini-unit">${glyph}</span><span><strong>${unitNames[type]}</strong><small>预备 ${remaining} · 人口 ${unit.population} · ${unit.range}格</small></span>`;
     button.setAttribute('aria-pressed', String(deployType === type));
     button.addEventListener('click', () => {
       deployType = type;
@@ -339,6 +342,55 @@ function renderBattleUnitSelect() {
 function formatClock(seconds) {
   const safe = Math.max(0, Math.floor(seconds));
   return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
+}
+
+function renderAttackPlanEditor() {
+  if (!save) return;
+  const select = $('battleLevelSelect');
+  if (select.options.length !== LEVELS.length) {
+    select.replaceChildren(...LEVELS.map((level) => {
+      const option = document.createElement('option');
+      option.value = level.id;
+      option.textContent = `${level.id} · ${level.name}`;
+      return option;
+    }));
+  }
+  select.value = selectedLevelId;
+  const population = Object.entries(save.attackRoster).reduce((total, [type, count]) => total + (BALANCE.units[type]?.population || 0) * count, 0);
+  const barracksLevel = save.blueprint.buildings.find((item) => item.type === 'barracks')?.level || 1;
+  const capacity = BALANCE.progression.barracksPopulation[barracksLevel - 1] || 0;
+  $('attackPlanPopulation').textContent = `人口 ${population}/${capacity}`;
+  const label = selectedLevel.difficulty === 'easy' ? '轻松' : selectedLevel.difficulty === 'standard' ? '标准' : '挑战';
+  $('levelDifficulty').textContent = `${label} · AI 基地`;
+  $('battleLevelDetails').textContent = `${selectedLevel.formation} · ${selectedLevel.blueprint.buildings.filter((item) => item.type === 'wall').length} 段墙 · ${selectedLevel.garrison.length} 名驻军。弱点：${selectedLevel.weakPoint}`;
+  const rows = $('attackPlanEditor');
+  rows.replaceChildren();
+  for (const option of UNIT_OPTIONS) {
+    const unit = BALANCE.units[option.type];
+    const count = save.attackRoster[option.type] || 0;
+    const row = document.createElement('div');
+    row.className = 'attack-plan-row';
+    const title = document.createElement('span');
+    title.className = 'attack-plan-name';
+    title.innerHTML = `<strong>${option.name}</strong><small>${option.note} · 人口 ${unit.population}</small>`;
+    const stepper = document.createElement('div');
+    stepper.className = 'roster-stepper';
+    const decrement = document.createElement('button');
+    decrement.type = 'button'; decrement.className = 'roster-step'; decrement.textContent = '−';
+    decrement.setAttribute('aria-label', `减少${option.name}`);
+    decrement.dataset.rosterType = option.type; decrement.dataset.rosterDelta = '-1';
+    decrement.disabled = writingSave || count <= 0;
+    const amount = document.createElement('b'); amount.textContent = String(count);
+    const increment = document.createElement('button');
+    increment.type = 'button'; increment.className = 'roster-step'; increment.textContent = '+';
+    increment.setAttribute('aria-label', `增加${option.name}`);
+    increment.dataset.rosterType = option.type; increment.dataset.rosterDelta = '1';
+    increment.disabled = writingSave || population + unit.population > capacity;
+    stepper.append(decrement, amount, increment);
+    row.append(title, stepper);
+    rows.append(row);
+  }
+  $('prepareBattle').disabled = writingSave || population <= 0;
 }
 
 function eventLabel(event) {
@@ -358,11 +410,14 @@ function renderBattlePane() {
   const session = $('battleSessionPanel');
   const prepare = $('prepareBattle');
   const phaseLabel = $('battlePhaseLabel');
+  const planning = $('battlePlanningPanel');
+  const showPlanning = battleIsPreview || battleState.phase === 'complete';
+  planning.hidden = !showPlanning;
+  if (showPlanning) renderAttackPlanEditor();
   session.hidden = battleIsPreview;
-  prepare.hidden = !battleIsPreview && battleState.phase !== 'complete';
-  prepare.textContent = battleState.phase === 'complete' ? '再次挑战 E1' : '开始进攻';
+  prepare.textContent = battleState.phase === 'complete' ? `再次挑战 ${selectedLevelId}` : '开始进攻';
   phaseLabel.textContent = battleIsPreview
-    ? '可重复挑战 · 部署前 AI 不行动，计时未开始。'
+    ? '选择单位数量与关卡。部署前 AI 不行动、战斗计时未开始。'
     : battleState.phase === 'ready' ? '侦察完成 · 等待首次部署；AI 守军仍未行动。'
       : battleState.phase === 'active' ? '交战中 · 守军已响应，部署前尚未消耗战斗时间。'
         : '本场已结算 · 可查看战报或重新挑战。';
@@ -378,7 +433,7 @@ function renderBattlePane() {
       ? `${battleState.paused ? '已暂停 · ' : ''}${formatClock(remainingSeconds)} · ${battleSpeed}×`
       : `已用时 ${formatClock(battleState.elapsedTicks / (1000 / BALANCE.tickMs))}`;
   $('battleProgress').textContent = battleState.phase === 'ready'
-    ? '选择巡卫或弩手，在地图外缘点一个部署环格，再确认。首次部署后才开始 180 秒计时。'
+    ? '选择预备兵种，在地图外缘点一个部署环格，再确认。首次部署后才开始 180 秒计时。'
     : battleState.phase === 'active'
       ? `建筑破坏 ${destroyed}/${battleState.initialBuildingCount} · 权重破坏 ${damagePercent.toFixed(1)}% · 预备巡卫 ${battleState.inventory.guard || 0}、弩手 ${battleState.inventory.crossbow || 0}`
       : '本局结果已冻结，战场不会写回任何基地损伤。';
@@ -448,7 +503,7 @@ async function beginBattleSession() {
   if (!saved || !battleId) return;
   const sequence = Number(battleId.split('-').at(-1));
   const seed = (498321 + sequence) >>> 0;
-  battleState = createBattle({ seed, level: E1_LEVEL, attackRoster: save.attackRoster, battleId });
+  battleState = createBattle({ seed, level: selectedLevel, attackRoster: save.attackRoster, battleId });
   applyBattleCommands(battleState, [{ type: 'start' }]);
   battleIsPreview = false;
   deployType = 'guard';
@@ -599,6 +654,26 @@ canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 
 for (const tab of document.querySelectorAll('.mode-tab')) tab.addEventListener('click', () => setMode(tab.dataset.mode));
+$('battleLevelSelect').addEventListener('change', (event) => {
+  const level = getLevel(event.target.value);
+  if (!save || !level || (!battleIsPreview && battleState.phase !== 'complete')) return;
+  selectedLevelId = level.id;
+  selectedLevel = structuredClone(level);
+  if (battleIsPreview) {
+    battleState = createBattle({ seed: 498321, level: selectedLevel, attackRoster: save.attackRoster, battleId: `${selectedLevelId}-preview` });
+    camera.zoom = 1; camera.panX = 0; camera.panY = 0;
+  }
+  renderBattlePane();
+});
+$('attackPlanEditor').addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-roster-type]');
+  if (!button || writingSave || (!battleIsPreview && battleState.phase !== 'complete')) return;
+  const type = button.dataset.rosterType;
+  const next = { ...save.attackRoster, [type]: (save.attackRoster[type] || 0) + Number(button.dataset.rosterDelta) };
+  if (next[type] < 0) return;
+  const ok = await commitMutation(() => setAttackRoster(save, next));
+  if (ok) renderBattlePane();
+});
 $('prepareBattle').addEventListener('click', beginBattleSession);
 $('cancelDeploy').addEventListener('click', () => { deployCandidate = null; renderBattlePane(); });
 $('confirmDeploy').addEventListener('click', () => {
@@ -684,6 +759,7 @@ async function start() {
   renderOverview();
   updateEditorPane();
   updateGarrisonPane();
+  renderBattlePane();
   render();
 }
 
