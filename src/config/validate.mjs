@@ -5,6 +5,12 @@ export function validateBalance(balance = BALANCE) {
   if (balance.tickMs <= 0) errors.push('tickMs must be positive');
   if (balance.map.width !== 28 || balance.map.height !== 28) errors.push('launch map must be 28×28');
   if (!(balance.battle.durationSeconds > 0) || !(balance.battle.projectileSpeed > 0)) errors.push('battle timing and projectile speed must be positive');
+  if (!(balance.ai.visionRange > 0) || !(balance.ai.decisionIntervalTicks > 0) || !(balance.ai.switchCooldownTicks > 0)) errors.push('AI evaluation timing and vision must be positive');
+  if (!(balance.ai.holdBaseScore >= 0) || !(balance.ai.towerCoverHoldBonus >= 0) || !(balance.ai.routeTimePenalty >= 0) || !(balance.ai.nearbyEnemyPenalty >= 0) || !(balance.ai.routeTowerExposurePenalty >= 0)) errors.push('AI decision weights must be non-negative');
+  if (!(balance.battle.unitSeparation > 0)) errors.push('unit separation must be positive');
+  for (const difficulty of ['easy', 'standard', 'challenge']) {
+    if (!(balance.ai.exitTravelSeconds[difficulty] > 0) || !(balance.ai.nearbyEnemyLimit[difficulty] > 0)) errors.push(`${difficulty}: invalid AI exit evaluation values`);
+  }
   for (const [level, limits] of Object.entries(balance.progression.coreLimits)) {
     if (!Number.isInteger(Number(level)) || Object.values(limits).some((value) => !Number.isInteger(value) || value < 0)) errors.push(`core level ${level}: invalid building limits`);
   }

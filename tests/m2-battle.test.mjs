@@ -31,14 +31,14 @@ test('battle and defender remain idle after start until the first deployment', (
   assert.ok(state.buildings.every((building) => building.hp === building.maxHp));
 });
 
-test('first deployment starts the timer and activates the hold policy', () => {
+test('first deployment starts the timer and activates the reactive defense policy', () => {
   const state = createBattle({ seed: 18, level });
   advanceBattleTick(state, [{ type: 'start' }, { type: 'deploy', unitType: 'guard', x: 1, y: 13 }]);
   assert.equal(state.phase, 'active');
   assert.equal(state.tick, 1);
   assert.equal(state.firstDeployment, true);
   assert.equal(state.aiDecisions.length, 3);
-  assert.ok(state.aiDecisions.every((decision) => decision.decision === 'hold'));
+  assert.deepEqual(state.aiDecisions.map((decision) => decision.decision), ['hold', 'hold', 'hold']);
   assert.equal(state.inventory.guard, 5);
   for (let tick = 1; tick < 40; tick += 1) advanceBattleTick(state);
   assert.equal(state.elapsedTicks, 40);
