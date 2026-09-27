@@ -3,6 +3,14 @@ export const BALANCE = Object.freeze({
   tickMs: 50,
   map: Object.freeze({ width: 28, height: 28, buildMin: 2, buildMax: 25, deploymentRing: 2 }),
   economy: Object.freeze({ initialCoins: 2500 }),
+  progression: Object.freeze({
+    coreLimits: Object.freeze({
+      1: Object.freeze({ archerTower: 2, machineTower: 1, cannonTower: 1, walls: 24 }),
+      2: Object.freeze({ archerTower: 3, machineTower: 2, cannonTower: 2, walls: 36 }),
+      3: Object.freeze({ archerTower: 4, machineTower: 3, cannonTower: 3, walls: 48 }),
+    }),
+    barracksPopulation: Object.freeze([0, 16, 24, 32]),
+  }),
   buildings: Object.freeze({
     core: Object.freeze({ footprint: [3, 3], hp: [3500, 4800, 6300], buildCost: [0, 1200, 2800], weight: 30 }),
     barracks: Object.freeze({ footprint: [2, 2], hp: [1100, 1400, 1800], buildCost: [0, 900, 2200], weight: 5 }),
